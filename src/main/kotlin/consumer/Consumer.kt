@@ -3,6 +3,7 @@ package consumer
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.databind.util.StdDateFormat
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import model.Person
 import org.apache.kafka.clients.consumer.KafkaConsumer
@@ -20,6 +21,12 @@ import java.util.Properties
 class Consumer(brokers: String) {
     private val consumer = createConsumer(brokers)
     private val producer = Producer(brokers).createProducer(brokers)
+    private val jsonMapper = jacksonObjectMapper()
+//        ObjectMapper().apply {
+//        registerKotlinModule()
+//        disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+//        setDateFormat(StdDateFormat())
+//    }
     private fun createConsumer(brokers: String):KafkaConsumer<String, String> {
         val props = Properties()
         props["bootstrap.servers"] = brokers
@@ -31,20 +38,15 @@ class Consumer(brokers: String) {
 
     fun consume(topic: String) {
         consumer.subscribe(listOf(topic))
-        val jsonMapper = ObjectMapper().apply {
-            registerKotlinModule()
-            disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-            setDateFormat(StdDateFormat())
-        }
 
         while (true) {
             val records = consumer.poll(Duration.ofSeconds(1))
-            records.iterator().forEach {
-                val p = it.value()
-                val person = jsonMapper.readValue(p, Person::class.java)
-                val birthdate = person.birthDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
-                val age = Period.between(birthdate, LocalDate.now()).years
-                val future = producer.send(ProducerRecord("ages", "${person.firstName}-${person.lastName}", "$age"))
+            records.iterator().forEach { record ->
+                val person = jsonMapper.readValue(record.value(), Person::class.java)
+                // use instant
+                val birthDate = person.birthDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
+                val age = Period.between(birthDate, LocalDate.now()).years
+                val future = producer.send(ProducerRecord("ages", "${person.firstName}-${person.lastName}", age.toString()))
                 future.get()
                 println(person)
             }
